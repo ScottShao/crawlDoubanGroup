@@ -9,11 +9,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+)
+
+const (
+	RETRY_REQUEST_TIME = 5
 )
 
 var topicList map[string]*Topic
@@ -47,7 +52,7 @@ func init() {
 
 	jsonPath = filepath.Join("./", crawlUser)
 	today := today()
-	b, err := ioutil.ReadFile(filepath.Join(jsonPath, "/", today, ".json"))
+	b, err := ioutil.ReadFile(filepath.Join(jsonPath, today+".json"))
 	if len(b) == 0 {
 		b = []byte("{}")
 	}
@@ -91,7 +96,7 @@ func handlerFunc(resp http.ResponseWriter, req *http.Request) {
 }
 
 func respTopics(date string, resp http.ResponseWriter) {
-	topicList := make(map[string]*Topic, 0)
+	respTopicList := make(map[string]*Topic, 0)
 
 	jsonPath = filepath.Join("./", crawlUser)
 	b, err := ioutil.ReadFile(filepath.Join(jsonPath, date+".json"))
@@ -99,15 +104,15 @@ func respTopics(date string, resp http.ResponseWriter) {
 		b = []byte("{}")
 	}
 
-	err = json.Unmarshal(b, &topicList)
+	err = json.Unmarshal(b, &respTopicList)
 	if err != nil {
 		fmt.Println(err)
 		resp.Write([]byte("inner error"))
 		return
 	}
 
-	if len(topicList) > 0 {
-		html := renderHtml(topicList)
+	if len(respTopicList) > 0 {
+		html := renderHtml(respTopicList)
 		resp.Header().Set("Content", "txt/html")
 		resp.Write([]byte(html))
 	} else {
@@ -116,19 +121,36 @@ func respTopics(date string, resp http.ResponseWriter) {
 }
 
 func renderHtml(topicList map[string]*Topic) string {
+	topic_keys := make([]string, 0)
+	for key, _ := range topicList {
+		topic_keys = append(topic_keys, key)
+	}
+
+	sort.StringSlice(topic_keys).Sort()
+
 	htmlHead := `<!DOCTYPE html>
 		<html>
 			<title>topic list</title>
 		`
 	htmlList := ""
-	for _, v := range topicList {
+	for _, key := range topic_keys {
+		v, _ := topicList[key]
 		listHead := fmt.Sprintf(
 			`<li>
 				<a href=%s style='text-decoration: none;' target=\"blank\">%s -- %s</a>
 				<ul>`,
 			v.Url, v.Title, v.User)
 		listBody := ""
-		for _, reply := range v.Replys {
+
+		reply_keys := make([]string, 0)
+		for key, _ := range v.Replys {
+			reply_keys = append(reply_keys, key)
+		}
+
+		sort.StringSlice(reply_keys).Sort()
+
+		for _, key := range reply_keys {
+			reply, _ := v.Replys[key]
 			listBody += fmt.Sprintf(
 				`<li>
 					<quote>
@@ -163,7 +185,7 @@ func startCrawl() {
 
 		for {
 			select {
-			case <-time.NewTicker(10 * time.Minute).C:
+			case <-time.NewTicker(30 * time.Minute).C:
 				err := crawlAndThen()
 				if err != nil {
 					fmt.Println(err)
@@ -180,6 +202,7 @@ func crawlAndThen() error {
 		return nil
 	}
 
+	fmt.Println("find new")
 	return save()
 }
 
@@ -193,7 +216,7 @@ func crawl() bool {
 
 	topics_root := doc.Find(".olt").First()
 
-	if topics_root == nil {
+	if topics_root.Length() == 0 {
 		return false
 	}
 
@@ -202,6 +225,8 @@ func crawl() bool {
 	page_num := topic_nodes.Length()
 
 	this_crawl_last_time := lastPubTime
+
+	fmt.Println("start crawl time: ", this_crawl_last_time)
 
 	topic_nodes.Each(func(i int, s_topic *goquery.Selection) {
 		s_title := s_topic.Find("td").First().Find("a").First()
@@ -214,9 +239,9 @@ func crawl() bool {
 		arr := strings.Split(topic_url, "/")
 		topic_id := arr[len(arr)-2]
 
-		docNew, err := goquery.NewDocument(topic_url)
-		if err != nil {
-			fmt.Println(err)
+		docNew := requestDoc(topic_url, RETRY_REQUEST_TIME)
+		if docNew == nil {
+			fmt.Println("error after retry")
 			return
 		}
 
@@ -230,11 +255,8 @@ func crawl() bool {
 		}
 
 		for k := 0; k < reply_page_num; k++ {
-			docNew, err := goquery.NewDocument(topic_url + "?start=" + strconv.Itoa(k*100))
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
+			reply_url := topic_url + "?start=" + strconv.Itoa(k*100)
+			docNew := requestDoc(reply_url, RETRY_REQUEST_TIME)
 
 			replys := docNew.Find("#comments").First().Find("li")
 			replys.Each(func(j int, s_reply *goquery.Selection) {
@@ -257,8 +279,9 @@ func crawl() bool {
 					return
 				}
 
-				if this_time.After(this_crawl_last_time) {
+				if this_time.After(lastPubTime) {
 					this_crawl_last_time = this_time
+					fmt.Println("find one")
 				} else {
 					return
 				}
@@ -293,15 +316,28 @@ func crawl() bool {
 				}
 			})
 			fmt.Println(fmt.Sprintf("crawl reply %d/%d", k+1, reply_page_num))
-			time.Sleep(time.Second * 1)
+			time.Sleep(time.Second * 2)
 		}
 
 		fmt.Println(fmt.Sprintf("crawl topic %d/%d", i+1, page_num))
-		time.Sleep(time.Second * 1)
 	})
 
 	lastPubTime = this_crawl_last_time
 	return hasNew
+}
+
+func requestDoc(url string, num int) *goquery.Document {
+	docNew, err := goquery.NewDocument(url)
+	if err != nil {
+		fmt.Println(err)
+		if num > 0 {
+			time.Sleep(time.Second * 1)
+			return requestDoc(url, num-1)
+		} else {
+			return nil
+		}
+	}
+	return docNew
 }
 
 func today() string {
@@ -315,8 +351,10 @@ func yesterday() string {
 }
 
 func save() (err error) {
-	err = writeLastCrawlTime()
 	err = saveTopicList()
+	if err == nil {
+		writeLastCrawlTime()
+	}
 
 	return err
 }
