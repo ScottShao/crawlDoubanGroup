@@ -19,9 +19,9 @@ import (
 
 const (
 	RETRY_REQUEST_TIME = 5
+	CRAWL_INTERVAL     = time.Minute * 30
 )
 
-var topicList map[string]*Topic
 var config Config
 var crawlUrl, crawlUser, jsonPath string
 var lastPubTime time.Time //爬过的最后回复时间
@@ -50,6 +50,11 @@ func init() {
 		panic("Url or Username is empty")
 	}
 
+	readLastCrawlTime()
+}
+
+func readTodayTopics() map[string]*Topic {
+	topicList := make(map[string]*Topic, 0)
 	jsonPath = filepath.Join("./", crawlUser)
 	today := today()
 	b, err := ioutil.ReadFile(filepath.Join(jsonPath, today+".json"))
@@ -58,10 +63,10 @@ func init() {
 	}
 	err = json.Unmarshal(b, &topicList)
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 
-	readLastCrawlTime()
+	return topicList
 }
 
 func main() {
@@ -138,6 +143,7 @@ func renderHtml(topicList map[string]*Topic) string {
 		listHead := fmt.Sprintf(
 			`<li>
 				<a href=%s style='text-decoration: none;' target=\"blank\">%s -- %s</a>
+				</br>
 				<ul>`,
 			v.Url, v.Title, v.User)
 		listBody := ""
@@ -159,7 +165,10 @@ func renderHtml(topicList map[string]*Topic) string {
 					<h3>
 						%s
 					</h3>
-				</li>`, reply.Quote, reply.Content)
+					<h5>
+						%s
+					</h5>
+				</li>`, reply.Quote, reply.Content, reply.Time)
 		}
 		listFooter := `
 			</ul>
@@ -178,46 +187,39 @@ func startCrawl() {
 	go func() {
 		runtime.Gosched()
 
-		err := crawlAndThen()
-		if err != nil {
-			fmt.Println(err)
-		}
-
 		for {
 			select {
-			case <-time.NewTicker(30 * time.Minute).C:
-				err := crawlAndThen()
-				if err != nil {
-					fmt.Println(err)
-				}
+			case <-time.NewTicker(CRAWL_INTERVAL).C:
+
 			}
 		}
 	}()
 }
 
-func crawlAndThen() error {
-	hasNew := crawl()
+func tickCrawl() {
+	hasNew, topicList := crawl()
 	if !hasNew {
 		fmt.Println("no new")
-		return nil
+		return
 	}
 
 	fmt.Println("find new")
-	return save()
+	save(topicList)
 }
-
-func crawl() bool {
+func crawl() (bool, map[string]*Topic) {
+	topicList := readTodayTopics()
 	hasNew := false
+	fmt.Println("crawl time: ", time.Now())
 	doc, err := goquery.NewDocument(crawlUrl)
 	if err != nil {
 		fmt.Println(err)
-		return false
+		return false, topicList
 	}
 
 	topics_root := doc.Find(".olt").First()
 
 	if topics_root.Length() == 0 {
-		return false
+		return false, topicList
 	}
 
 	topic_nodes := topics_root.Find("tr")
@@ -226,7 +228,7 @@ func crawl() bool {
 
 	this_crawl_last_time := lastPubTime
 
-	fmt.Println("start crawl time: ", this_crawl_last_time)
+	fmt.Println("last crawl time: ", this_crawl_last_time)
 
 	topic_nodes.Each(func(i int, s_topic *goquery.Selection) {
 		s_title := s_topic.Find("td").First().Find("a").First()
@@ -323,7 +325,7 @@ func crawl() bool {
 	})
 
 	lastPubTime = this_crawl_last_time
-	return hasNew
+	return hasNew, topicList
 }
 
 func requestDoc(url string, num int) *goquery.Document {
@@ -350,8 +352,8 @@ func yesterday() string {
 	return fmt.Sprintf("%d-%02d-%02d", year, int(month), day)
 }
 
-func save() (err error) {
-	err = saveTopicList()
+func save(topicList map[string]*Topic) (err error) {
+	err = saveTopicList(topicList)
 	if err == nil {
 		writeLastCrawlTime()
 	}
@@ -359,7 +361,7 @@ func save() (err error) {
 	return err
 }
 
-func saveTopicList() error {
+func saveTopicList(topicList map[string]*Topic) error {
 	dir := filepath.Join("./", crawlUser)
 	err := ensureDir(dir)
 	if err != nil {
