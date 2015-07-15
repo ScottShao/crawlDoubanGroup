@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -27,6 +28,8 @@ const (
 var config Config
 var crawlUrl, crawlUser, jsonPath string
 var lastPubTime time.Time //爬过的最后回复时间
+
+var crawlMutex sync.Mutex
 
 type Reply struct {
 	Id      string
@@ -103,6 +106,9 @@ func handlerFunc(resp http.ResponseWriter, req *http.Request) {
 		respTopics(today(), resp)
 	case path == "/topics/yesterday":
 		respTopics(yesterday(), resp)
+	case path == "/api/crawl":
+		go tickCrawl()
+		resp.Write([]byte("ok"))
 	default:
 		resp.Write([]byte("no new"))
 	}
@@ -192,19 +198,28 @@ func renderHtml(topicList map[string]*Topic) string {
 
 func startCrawl() {
 	go func() {
-		tickCrawl()
 		runtime.Gosched()
+		tickCrawl()
 
 		for {
 			select {
 			case <-time.NewTicker(CRAWL_TOTAL_INTERVAL).C:
-				tickCrawl()
+				go tickCrawl()
 			}
 		}
 	}()
 }
 
 func tickCrawl() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Println(r)
+		}
+	}()
+
+	crawlMutex.Lock()
+	defer crawlMutex.Unlock()
+
 	hasNew, topicList := crawl()
 	if !hasNew {
 		log.Println("no new")
