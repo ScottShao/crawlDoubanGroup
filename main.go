@@ -148,7 +148,9 @@ func renderHtml(topicList map[string]*Topic) string {
 
 	htmlHead := `<!DOCTYPE html>
 		<html>
-			<title>topic list</title>
+			<head>
+			<title>topic and reply</title>
+			</head>
 		`
 	htmlList := ""
 	for _, key := range topic_keys {
