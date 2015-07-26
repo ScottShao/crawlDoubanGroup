@@ -5,6 +5,9 @@
 	"UserName": "wxmang",
 	"CrawlStartTime": "2015-07-01 00:00:00 +0800 CST",
 
-	"email": "",
-	"email_password":""
+	"EmailAddr": "smtp.163.com",
+	"EmailPort": 25,
+	"EmailUser": "xxx@163.com",
+	"EmailPassword":"xxx",
+	"EmailTo": "xxxx@gmail.com"
 }

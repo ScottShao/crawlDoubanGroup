@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"gopkg.in/gomail.v1"
 )
 
 const (
@@ -28,7 +29,7 @@ const (
 var config Config
 var crawlUrl, crawlUser, jsonPath string
 var lastPubTime time.Time //爬过的最后回复时间
-
+var email = &Email{}
 var crawlMutex sync.Mutex
 
 type Reply struct {
@@ -46,10 +47,24 @@ type Topic struct {
 	Replys map[string]*Reply
 }
 
+type Email struct {
+	Addr     string
+	User     string
+	Password string
+	Port     int
+	To       string
+}
+
 func init() {
 	config = ReadConf("./config.json")
 	crawlUrl = config.Get("Url").(string)
 	crawlUser = config.Get("UserName").(string)
+
+	email.Addr = config.Get("EmailAddr").(string)
+	email.Port = int(config.Get("EmailPort").(float64))
+	email.User = config.Get("EmailUser").(string)
+	email.Password = config.Get("EmailPassword").(string)
+	email.To = config.Get("EmailTo").(string)
 
 	if crawlUrl == "" || crawlUser == "" {
 		panic("Url or Username is empty")
@@ -198,6 +213,22 @@ func renderHtml(topicList map[string]*Topic) string {
 	return htmlHead + htmlBody + htmlFooter
 }
 
+func sendMail(content string) {
+	if email.Addr == "" {
+		return
+	}
+
+	msg := gomail.NewMessage()
+	msg.SetHeader("From", email.User)
+	msg.SetHeader("To", email.To)
+	msg.SetHeader("Subject", "new topics")
+	msg.SetBody("text/html", content)
+
+	mailer := gomail.NewMailer(email.Addr, email.User, email.Password, email.Port)
+	if err := mailer.Send(msg); err != nil {
+		log.Println(err)
+	}
+}
 func startCrawl() {
 	go func() {
 		runtime.Gosched()
@@ -230,6 +261,7 @@ func tickCrawl() {
 
 	log.Println("find new")
 	save(topicList)
+	sendMail(renderHtml(topicList))
 }
 func crawl() (bool, map[string]*Topic) {
 	topicList := readTodayTopics()
