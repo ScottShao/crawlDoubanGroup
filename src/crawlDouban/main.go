@@ -21,10 +21,16 @@ import (
 )
 
 const (
-	RETRY_REQUEST_TIME   = 5                //每个文档，重试次数
-	CRAWL_TOTAL_INTERVAL = time.Minute * 30 //每次整体爬虫的间隔时间
-	CRAWL_DOC_INTERVAL   = time.Second * 1  //每次爬虫请求的间隔时间
+	RETRY_REQUEST_TIME         = 5                //每个文档，重试次数
+	CRAWL_TOTAL_LONG_INTERVAL  = time.Minute * 30 //每次整体爬虫的间隔时间
+	CRAWL_TOTAL_SHORT_INTERVAL = time.Minute * 10 //每次整体爬虫的间隔时间
+	CRAWL_DOC_INTERVAL         = time.Second * 1  //每次爬虫请求的间隔时间
+
+	MAX_NO_NEW_SHORT_CRAWL = 3 //达到此阀值则间隔时间设为长间隔
 )
+
+var noNewCounter int8 = 0
+var crawlInterval time.Duration = CRAWL_TOTAL_SHORT_INTERVAL
 
 var config Config
 var crawlUrl, crawlUser, jsonPath string
@@ -105,6 +111,7 @@ func startServer() {
 	if port == "" {
 		port = "8090"
 	}
+
 	http.Handle("/", http.HandlerFunc(handlerFunc))
 	log.Println("listening on:" + port)
 	http.ListenAndServe(":"+port, nil)
@@ -231,14 +238,12 @@ func sendMail(content string) {
 }
 func startCrawl() {
 	go func() {
-		runtime.Gosched()
-		tickCrawl()
-
 		for {
-			select {
-			case <-time.NewTicker(CRAWL_TOTAL_INTERVAL).C:
-				go tickCrawl()
-			}
+			runtime.Gosched()
+			tickCrawl()
+
+			fmt.Println(crawlInterval)
+			time.Sleep(crawlInterval)
 		}
 	}()
 }
@@ -256,10 +261,17 @@ func tickCrawl() {
 	hasNew, topicList := crawl()
 	if !hasNew {
 		log.Println("no new")
+		noNewCounter++
+		if noNewCounter >= MAX_NO_NEW_SHORT_CRAWL {
+			crawlInterval = CRAWL_TOTAL_LONG_INTERVAL
+		}
 		return
 	}
 
 	log.Println("find new")
+	noNewCounter = 0
+	crawlInterval = CRAWL_TOTAL_SHORT_INTERVAL
+
 	save(topicList)
 	sendMail(renderHtml(topicList))
 }
