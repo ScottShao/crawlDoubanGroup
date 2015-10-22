@@ -1,0 +1,30 @@
+{
+	"ImportPath": "crawlDouban",
+	"GoVersion": "go1.5.1",
+	"Packages": [
+		"./..."
+	],
+	"Deps": [
+		{
+			"ImportPath": "github.com/PuerkitoBio/goquery",
+			"Comment": "v0.3.2-80-g417cce8",
+			"Rev": "417cce822c7b9a379df5824be95228d177c5698b"
+		},
+		{
+			"ImportPath": "github.com/andybalholm/cascadia",
+			"Rev": "3ad29d1ad1c4f2023e355603324348cf1f4b2d48"
+		},
+		{
+			"ImportPath": "golang.org/x/net/html",
+			"Rev": "9946ad7d5eae91d8edca4f54d1a1e130a052e823"
+		},
+		{
+			"ImportPath": "gopkg.in/alexcesaro/quotedprintable.v2",
+			"Rev": "9b4a113f96b3263b5223fe9c5fd1d1115811b343"
+		},
+		{
+			"ImportPath": "gopkg.in/gomail.v1",
+			"Rev": "11b919ab4933936a28fb6aeda5c6523091266f37"
+		}
+	]
+}
